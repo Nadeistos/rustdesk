@@ -2598,6 +2598,12 @@ fn load_builtin_server_settings() {
     if let Some(app_name) = option_env!("APP_NAME").filter(|s| !s.is_empty()) {
         *config::APP_NAME.write().unwrap() = app_name.to_owned();
     }
+    if option_env!("DISABLE_ACCOUNT") == Some("Y") {
+        config::HARD_SETTINGS
+            .write()
+            .unwrap()
+            .insert("disable-account".to_owned(), "Y".to_owned());
+    }
     let Some(host) = option_env!("RENDEZVOUS_SERVER").filter(|s| !s.is_empty()) else {
         return;
     };

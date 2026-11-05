@@ -4,6 +4,14 @@ name: Windows custom build
 
 on:
   workflow_dispatch:
+    inputs:
+      edition:
+        description: "client: account tab hidden; technicien: login and address book enabled"
+        type: choice
+        options:
+          - client
+          - technicien
+        default: client
 
 env:
   LLVM_VERSION: "15.0.6"
@@ -27,8 +35,8 @@ jobs:
             exit 1
           fi
           # The app name ends up in paths and unquoted service commands.
-          if [ -n "$APP_NAME" ] && ! [[ "$APP_NAME" =~ ^[A-Za-z0-9_-]+$ ]]; then
-            echo "::error::APP_NAME may only contain letters, digits, '-' and '_' (no spaces or accents)."
+          if [ -n "$APP_NAME" ] && ! [[ "$APP_NAME" =~ ^[A-Za-z0-9._-]+$ ]]; then
+            echo "::error::APP_NAME may only contain letters, digits, '.', '-' and '_' (no spaces or accents)."
             exit 1
           fi
 
@@ -55,6 +63,7 @@ jobs:
       RELAY_SERVER: ${{ secrets.RELAY_SERVER }}
       API_SERVER: ${{ secrets.API_SERVER }}
       APP_NAME: ${{ secrets.APP_NAME }}
+      DISABLE_ACCOUNT: ${{ inputs.edition == 'client' && 'Y' || '' }}
     steps:
       - name: Export GitHub Actions cache environment variables
         uses: actions/github-script@d7906e4ad0b1822421a7e6a35d5ca353c962f410 # v6
@@ -72,7 +81,7 @@ jobs:
         shell: bash
         run: |
           echo "VERSION=$(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)" >> "$GITHUB_ENV"
-          echo "OUT_NAME=${APP_NAME:-rustdesk}" >> "$GITHUB_ENV"
+          echo "OUT_NAME=${APP_NAME:-rustdesk}-${{ inputs.edition }}" >> "$GITHUB_ENV"
           echo "MSI_APP_NAME=${APP_NAME:-RustDesk}" >> "$GITHUB_ENV"
 
       - name: Restore bridge files
