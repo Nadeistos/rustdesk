@@ -2493,6 +2493,7 @@ pub fn rustdesk_interval(i: Interval) -> ThrottledInterval {
 }
 
 pub fn load_custom_client() {
+    load_builtin_server_settings();
     #[cfg(debug_assertions)]
     if let Ok(data) = std::fs::read_to_string("./custom.txt") {
         read_custom_client(data.trim());
@@ -2588,6 +2589,33 @@ pub fn get_dst_align_rgba() -> usize {
 #[cfg(not(target_os = "macos"))]
 pub fn get_dst_align_rgba() -> usize {
     1
+}
+
+// Server settings baked in at build time (RENDEZVOUS_SERVER, RS_PUB_KEY, RELAY_SERVER, API_SERVER).
+// Without RENDEZVOUS_SERVER the build behaves exactly like upstream.
+fn load_builtin_server_settings() {
+    let Some(host) = option_env!("RENDEZVOUS_SERVER").filter(|s| !s.is_empty()) else {
+        return;
+    };
+    let mut overwrite = config::OVERWRITE_SETTINGS.write().unwrap();
+    for (k, v) in [
+        (keys::OPTION_CUSTOM_RENDEZVOUS_SERVER, Some(host)),
+        (keys::OPTION_KEY, option_env!("RS_PUB_KEY")),
+        (keys::OPTION_RELAY_SERVER, option_env!("RELAY_SERVER")),
+        (keys::OPTION_API_SERVER, option_env!("API_SERVER")),
+    ] {
+        overwrite.insert(k.to_owned(), v.unwrap_or_default().to_owned());
+    }
+    drop(overwrite);
+    config::BUILTIN_SETTINGS
+        .write()
+        .unwrap()
+        .insert(keys::OPTION_HIDE_SERVER_SETTINGS.to_owned(), "Y".to_owned());
+    // Lets the supporter change this client's settings (e.g. set its permanent password) during a session.
+    config::DEFAULT_SETTINGS.write().unwrap().insert(
+        keys::OPTION_ALLOW_REMOTE_CONFIG_MODIFICATION.to_owned(),
+        "Y".to_owned(),
+    );
 }
 
 pub fn read_custom_client(config: &str) {
