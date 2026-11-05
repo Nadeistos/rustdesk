@@ -2594,15 +2594,24 @@ pub fn get_dst_align_rgba() -> usize {
 // Server settings baked in at build time (RENDEZVOUS_SERVER, RS_PUB_KEY, RELAY_SERVER, API_SERVER).
 // Without RENDEZVOUS_SERVER the build behaves exactly like upstream.
 fn load_builtin_server_settings() {
+    // Also renames the install folder, installed exe, service and config folder.
+    if let Some(app_name) = option_env!("APP_NAME").filter(|s| !s.is_empty()) {
+        *config::APP_NAME.write().unwrap() = app_name.to_owned();
+    }
     let Some(host) = option_env!("RENDEZVOUS_SERVER").filter(|s| !s.is_empty()) else {
         return;
     };
+    config::OVERWRITE_LOCAL_SETTINGS
+        .write()
+        .unwrap()
+        .insert(keys::OPTION_ENABLE_CHECK_UPDATE.to_owned(), "N".to_owned());
     let mut overwrite = config::OVERWRITE_SETTINGS.write().unwrap();
     for (k, v) in [
         (keys::OPTION_CUSTOM_RENDEZVOUS_SERVER, Some(host)),
         (keys::OPTION_KEY, option_env!("RS_PUB_KEY")),
         (keys::OPTION_RELAY_SERVER, option_env!("RELAY_SERVER")),
         (keys::OPTION_API_SERVER, option_env!("API_SERVER")),
+        (keys::OPTION_ALLOW_AUTO_UPDATE, Some("N")),
     ] {
         overwrite.insert(k.to_owned(), v.unwrap_or_default().to_owned());
     }
