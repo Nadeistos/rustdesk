@@ -1,9 +1,17 @@
 # Builds a Windows x64 RustDesk with the server settings stored in this repository's
-# Actions secrets: RENDEZVOUS_SERVER and RS_PUB_KEY (required), RELAY_SERVER and API_SERVER (optional).
+# Actions secrets: RENDEZVOUS_SERVER and RS_PUB_KEY (required), RELAY_SERVER, API_SERVER and APP_NAME (optional).
 name: Windows custom build
 
 on:
   workflow_dispatch:
+    inputs:
+      edition:
+        description: "client: account tab hidden; technicien: login and address book enabled"
+        type: choice
+        options:
+          - client
+          - technicien
+        default: client
 
 env:
   LLVM_VERSION: "15.0.6"
@@ -20,9 +28,15 @@ jobs:
         env:
           RENDEZVOUS_SERVER: ${{ secrets.RENDEZVOUS_SERVER }}
           RS_PUB_KEY: ${{ secrets.RS_PUB_KEY }}
+          APP_NAME: ${{ secrets.APP_NAME }}
         run: |
           if [ -z "$RENDEZVOUS_SERVER" ] || [ -z "$RS_PUB_KEY" ]; then
             echo "::error::Set the RENDEZVOUS_SERVER and RS_PUB_KEY secrets (Settings > Secrets and variables > Actions)."
+            exit 1
+          fi
+          # The app name ends up in paths and unquoted service commands.
+          if [ -n "$APP_NAME" ] && ! [[ "$APP_NAME" =~ ^[A-Za-z0-9._-]+$ ]]; then
+            echo "::error::APP_NAME may only contain letters, digits, '.', '-' and '_' (no spaces or accents)."
             exit 1
           fi
 
@@ -48,6 +62,8 @@ jobs:
       RS_PUB_KEY: ${{ secrets.RS_PUB_KEY }}
       RELAY_SERVER: ${{ secrets.RELAY_SERVER }}
       API_SERVER: ${{ secrets.API_SERVER }}
+      APP_NAME: ${{ secrets.APP_NAME }}
+      DISABLE_ACCOUNT: ${{ inputs.edition == 'client' && 'Y' || '' }}
     steps:
       - name: Export GitHub Actions cache environment variables
         uses: actions/github-script@d7906e4ad0b1822421a7e6a35d5ca353c962f410 # v6
@@ -63,7 +79,10 @@ jobs:
 
       - name: Read version
         shell: bash
-        run: echo "VERSION=$(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)" >> "$GITHUB_ENV"
+        run: |
+          echo "VERSION=$(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)" >> "$GITHUB_ENV"
+          echo "OUT_NAME=${APP_NAME:-rustdesk}-${{ inputs.edition }}" >> "$GITHUB_ENV"
+          echo "MSI_APP_NAME=${APP_NAME:-RustDesk}" >> "$GITHUB_ENV"
 
       - name: Restore bridge files
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
@@ -148,16 +167,21 @@ jobs:
           name: topmostwindow-artifacts-x64
           path: "./rustdesk"
 
+      - name: Rename executable
+        if: env.APP_NAME != ''
+        shell: bash
+        run: mv ./rustdesk/rustdesk.exe "./rustdesk/$APP_NAME.exe"
+
       - name: Build self-extracted executable
         shell: bash
         run: |
           sed -i '/dpiAware/d' res/manifest.xml
           pushd ./libs/portable
           pip3 install -r requirements.txt
-          python3 ./generate.py -f ../../rustdesk/ -o . -e ../../rustdesk/rustdesk.exe
+          python3 ./generate.py -f ../../rustdesk/ -o . -e "../../rustdesk/${APP_NAME:-rustdesk}.exe"
           popd
           mkdir -p ./SignOutput
-          mv ./target/release/rustdesk-portable-packer.exe ./SignOutput/rustdesk-${{ env.VERSION }}-x86_64.exe
+          mv ./target/release/rustdesk-portable-packer.exe "./SignOutput/$OUT_NAME-$VERSION-x86_64.exe"
 
       - name: Add MSBuild to PATH
         uses: microsoft/setup-msbuild@6fb02220983dee41ce7ae257b6f4d8f9bf5ed4ce # v2
@@ -165,15 +189,15 @@ jobs:
       - name: Build msi
         run: |
           pushd ./res/msi
-          python preprocess.py --arp -d ../../rustdesk
+          python preprocess.py --arp -d ../../rustdesk --app-name $env:MSI_APP_NAME
           nuget restore msi.sln
           msbuild msi.sln -p:Configuration=Release -p:Platform=x64 /p:TargetVersion=Windows10
           $msi = Get-ChildItem ./Package/bin/*/Release/en-us/Package.msi | Select-Object -First 1
-          mv $msi.FullName ../../SignOutput/rustdesk-${{ env.VERSION }}-x86_64.msi
+          mv $msi.FullName "../../SignOutput/$env:OUT_NAME-$env:VERSION-x86_64.msi"
 
       - name: Upload
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: rustdesk-windows-custom-${{ env.VERSION }}
+          name: ${{ env.OUT_NAME }}-windows-${{ env.VERSION }}
           path: ./SignOutput
           if-no-files-found: error
