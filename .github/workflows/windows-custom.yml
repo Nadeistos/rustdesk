@@ -1,6 +1,8 @@
 # Builds a Windows x64 RustDesk with the server settings stored in this repository's
 # Actions secrets: RENDEZVOUS_SERVER and RS_PUB_KEY (required), RELAY_SERVER, API_SERVER and APP_NAME (optional).
 # TECH_PUBLIC_KEY (optional): technician public key; PCs holding the matching technicien.key connect without a prompt.
+# UPDATE_PUBLIC_KEY (optional): builds update themselves from this repository's releases, verified with this key.
+# UPDATE_SIGNING_KEY (needed to publish): PEM Ed25519 private key that signs the release metadata.
 name: Windows custom build
 
 on:
@@ -13,6 +15,14 @@ on:
           - client
           - technicien
         default: client
+      build:
+        description: "Build number (1-99) on top of the RustDesk version: 1.5.3 + 2 gives 1.5.302. Raise it for every release."
+        type: string
+        default: "1"
+      publish:
+        description: "Publish a release that installed PCs update to automatically"
+        type: boolean
+        default: false
 
 env:
   LLVM_VERSION: "15.0.6"
@@ -58,7 +68,12 @@ jobs:
   build-windows:
     needs: [build-RustDeskTempTopMostWindow, generate-bridge]
     runs-on: windows-2022
+    permissions:
+      contents: write
     env:
+      UPDATE_REPO: ${{ github.repository }}
+      UPDATE_PUBLIC_KEY: ${{ secrets.UPDATE_PUBLIC_KEY }}
+      UPDATE_CHANNEL: ${{ inputs.edition }}
       RENDEZVOUS_SERVER: ${{ secrets.RENDEZVOUS_SERVER }}
       RS_PUB_KEY: ${{ secrets.RS_PUB_KEY }}
       RELAY_SERVER: ${{ secrets.RELAY_SERVER }}
@@ -81,8 +96,19 @@ jobs:
 
       - name: Read version
         shell: bash
+        env:
+          BUILD_NUMBER: ${{ inputs.build }}
         run: |
-          echo "VERSION=$(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)" >> "$GITHUB_ENV"
+          base=$(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)
+          if ! [[ "$BUILD_NUMBER" =~ ^[0-9]{1,2}$ ]] || [ "$BUILD_NUMBER" -lt 1 ]; then
+            echo "::error::build must be a number from 1 to 99"
+            exit 1
+          fi
+          IFS=. read -r major minor patch <<< "$base"
+          version="$major.$minor.$((patch * 100 + BUILD_NUMBER))"
+          sed -i "0,/^version = \"$base\"/s//version = \"$version\"/" Cargo.toml
+          grep -m1 '^version' Cargo.toml
+          echo "VERSION=$version" >> "$GITHUB_ENV"
           echo "OUT_NAME=${APP_NAME:-rustdesk}-${{ inputs.edition }}" >> "$GITHUB_ENV"
           echo "MSI_APP_NAME=${APP_NAME:-RustDesk}" >> "$GITHUB_ENV"
 
@@ -203,3 +229,59 @@ jobs:
           name: ${{ env.OUT_NAME }}-windows-${{ env.VERSION }}
           path: ./SignOutput
           if-no-files-found: error
+
+      - name: Publish signed update release
+        if: ${{ inputs.publish }}
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          UPDATE_SIGNING_KEY: ${{ secrets.UPDATE_SIGNING_KEY }}
+          EDITION: ${{ inputs.edition }}
+        run: |
+          set -euo pipefail
+          if [ -z "$UPDATE_SIGNING_KEY" ] || [ -z "$UPDATE_PUBLIC_KEY" ]; then
+            echo "::error::Set the UPDATE_SIGNING_KEY and UPDATE_PUBLIC_KEY secrets to publish."
+            exit 1
+          fi
+          cd SignOutput
+          tag="$VERSION"
+          exe="$OUT_NAME-$VERSION-x86_64.exe"
+          msi="$OUT_NAME-$VERSION-x86_64.msi"
+          meta="rustdesk-update-$EDITION.json"
+          python - "$exe" "$tag" "$EDITION" "$GITHUB_REPOSITORY" "$meta" <<'EOF'
+          import hashlib, json, os, sys, datetime
+          exe, tag, edition, repo, meta = sys.argv[1:]
+          data = open(exe, "rb").read()
+          metadata = {
+              "schema_version": 1,
+              "app": "rustdesk",
+              "package_id": edition,
+              "version": tag,
+              "release_id": tag,
+              "published_at": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+              "signature_key_id": "custom-build-update",
+              "artifacts": [{
+                  "platform": "windows",
+                  "arch": "x86_64",
+                  "format": "exe",
+                  "url": f"https://github.com/{repo}/releases/download/{tag}/{exe}",
+                  "file_name": exe,
+                  "size": len(data),
+                  "sha256": hashlib.sha256(data).hexdigest(),
+              }],
+          }
+          open(meta, "wb").write(json.dumps(metadata, separators=(",", ":")).encode())
+          EOF
+          umask 077
+          printf '%s\n' "$UPDATE_SIGNING_KEY" > "$RUNNER_TEMP/update-key.pem"
+          { printf 'RustDesk update metadata v1\n'; cat "$meta"; } > "$RUNNER_TEMP/signed.bin"
+          openssl pkeyutl -sign -rawin -inkey "$RUNNER_TEMP/update-key.pem" -in "$RUNNER_TEMP/signed.bin" -out "$RUNNER_TEMP/sig.bin"
+          rm -f "$RUNNER_TEMP/update-key.pem"
+          printf '{"schema_version":1,"algorithm":"ed25519","key_id":"custom-build-update","signature":"%s"}' \
+            "$(base64 -w0 "$RUNNER_TEMP/sig.bin")" > "$meta.sig"
+          if ! gh release view "$tag" >/dev/null 2>&1; then
+            gh release create "$tag" --target "$GITHUB_SHA" --title "${APP_NAME:-RustDesk} $tag" \
+              --notes "Build $tag. Installed PCs update automatically." \
+              || gh release view "$tag" >/dev/null
+          fi
+          gh release upload "$tag" "$exe" "$msi" "$meta" "$meta.sig" --clobber

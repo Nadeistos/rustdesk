@@ -157,6 +157,23 @@ pub(crate) fn verify_update_metadata(
         expected_release_id: requirements.expected_release_id,
         artifact: requirements.artifact,
     };
+    if let Some(public_key) = crate::custom_update::public_key() {
+        let custom_keys = [TrustedUpdateKey {
+            key_id: crate::custom_update::KEY_ID,
+            algorithm: SIGNATURE_ALGORITHM,
+            public_key,
+        }];
+        return verify_update_metadata_with_options(
+            metadata_bytes,
+            signature_bytes,
+            VerificationOptions {
+                requirements: metadata_requirements,
+                expected_package_id: crate::custom_update::channel(),
+                artifact_url_policy,
+                trusted_keys: &custom_keys,
+            },
+        );
+    }
     verify_update_metadata_with_options(
         metadata_bytes,
         signature_bytes,

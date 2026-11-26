@@ -1099,6 +1099,12 @@ pub(crate) fn release_id_from_update_url(update_url: &str) -> ResultType<String>
     let release_id = match segments.as_slice() {
         ["rustdesk", "rustdesk", "releases", "tag", release_id] => *release_id,
         ["rustdesk", "rustdesk", "releases", "tag", release_id, ""] => *release_id,
+        [owner, name, "releases", "tag", release_id]
+        | [owner, name, "releases", "tag", release_id, ""]
+            if crate::custom_update::is_repo(owner, name) =>
+        {
+            *release_id
+        }
         _ => bail!(
             "Update URL is not a RustDesk release tag URL: {}",
             update_url
@@ -1177,6 +1183,18 @@ fn process_software_update_check_response(bytes: Bytes) -> ResultType<()> {
 // Because the url is always `https://api.rustdesk.com/version/latest`.
 #[tokio::main(flavor = "current_thread")]
 pub async fn do_check_software_update() -> hbb_common::ResultType<()> {
+    if let Some(repo) = crate::custom_update::repo() {
+        let result = match crate::custom_update::latest_release_page_url(repo).await {
+            Ok(url) => serde_json::to_vec(&json!({ "url": url }))
+                .map_err(hbb_common::anyhow::Error::from)
+                .and_then(|bytes| process_software_update_check_response(bytes.into())),
+            Err(err) => Err(err),
+        };
+        if result.is_err() {
+            clear_software_update_url();
+        }
+        return result;
+    }
     let (request, url) =
         hbb_common::version_check_request(hbb_common::VER_TYPE_RUSTDESK_CLIENT.to_string());
     let proxy_conf = Config::get_socks();
@@ -2631,7 +2649,10 @@ fn load_builtin_server_settings() {
         (keys::OPTION_KEY, option_env!("RS_PUB_KEY")),
         (keys::OPTION_RELAY_SERVER, option_env!("RELAY_SERVER")),
         (keys::OPTION_API_SERVER, option_env!("API_SERVER")),
-        (keys::OPTION_ALLOW_AUTO_UPDATE, Some("N")),
+        (
+            keys::OPTION_ALLOW_AUTO_UPDATE,
+            Some(if crate::custom_update::repo().is_some() { "Y" } else { "N" }),
+        ),
     ] {
         overwrite.insert(k.to_owned(), v.unwrap_or_default().to_owned());
     }
