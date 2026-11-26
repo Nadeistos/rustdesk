@@ -65,7 +65,7 @@ jobs:
       API_SERVER: ${{ secrets.API_SERVER }}
       APP_NAME: ${{ secrets.APP_NAME }}
       TECH_PUBLIC_KEY: ${{ secrets.TECH_PUBLIC_KEY }}
-      DISABLE_ACCOUNT:${{ inputs.edition == 'client' && 'Y' || '' }}
+      DISABLE_ACCOUNT: ${{ inputs.edition == 'client' && 'Y' || '' }}
     steps:
       - name: Export GitHub Actions cache environment variables
         uses: actions/github-script@d7906e4ad0b1822421a7e6a35d5ca353c962f410 # v6
