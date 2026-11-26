@@ -107,7 +107,9 @@ jobs:
           IFS=. read -r major minor patch <<< "$base"
           version="$major.$minor.$((patch * 100 + BUILD_NUMBER))"
           sed -i "0,/^version = \"$base\"/s//version = \"$version\"/" Cargo.toml
+          sed -i "/^name = \"rustdesk\"$/{n;s/^version = \"$base\"$/version = \"$version\"/}" Cargo.lock
           grep -m1 '^version' Cargo.toml
+          grep -A1 '^name = "rustdesk"$' Cargo.lock
           echo "VERSION=$version" >> "$GITHUB_ENV"
           echo "OUT_NAME=${APP_NAME:-rustdesk}-${{ inputs.edition }}" >> "$GITHUB_ENV"
           echo "MSI_APP_NAME=${APP_NAME:-RustDesk}" >> "$GITHUB_ENV"
