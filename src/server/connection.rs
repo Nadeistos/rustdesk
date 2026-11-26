@@ -3040,7 +3040,17 @@ impl Connection {
                 crate::get_builtin_option(keys::OPTION_ALLOW_LOGON_SCREEN_PASSWORD) == "Y"
                     && is_logon();
 
-            if (password::approve_mode() == ApproveMode::Click && !allow_logon_screen_password)
+            if crate::technician::verify_login_signature(&lr.password, &self.hash) {
+                self.set_conn_audit_primary_auth(ConnAuditPrimaryAuth::PermanentPassword);
+                if !self.begin_trusted_device().await {
+                    return false;
+                }
+                if !self.send_logon_response_and_keep_alive().await {
+                    return false;
+                }
+                self.try_start_cm(lr.my_id, lr.my_name, self.authorized);
+            } else if (password::approve_mode() == ApproveMode::Click
+                && !allow_logon_screen_password)
                 || password::approve_mode() == ApproveMode::Both && !password::has_valid_password()
             {
                 #[cfg(not(any(target_os = "android", target_os = "ios")))]

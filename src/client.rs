@@ -4762,6 +4762,26 @@ pub async fn handle_hash(
         return true;
     }
 
+    if password.is_empty() && !request_approval {
+        if let Some(signature) = crate::technician::login_signature(&hash) {
+            if let Err(error) = send_login(
+                lc.clone(),
+                String::new(),
+                String::new(),
+                signature,
+                trust,
+                peer,
+            )
+            .await
+            {
+                interface.on_error(&error.to_string());
+                return false;
+            }
+            lc.write().unwrap().hash = hash;
+            return true;
+        }
+    }
+
     let password = if password.is_empty() {
         // login without password, the remote side can click accept
         if !request_approval {

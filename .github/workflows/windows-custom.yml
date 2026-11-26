@@ -1,5 +1,6 @@
 # Builds a Windows x64 RustDesk with the server settings stored in this repository's
 # Actions secrets: RENDEZVOUS_SERVER and RS_PUB_KEY (required), RELAY_SERVER, API_SERVER and APP_NAME (optional).
+# TECH_PUBLIC_KEY (optional): technician public key; PCs holding the matching technicien.key connect without a prompt.
 name: Windows custom build
 
 on:
@@ -63,7 +64,8 @@ jobs:
       RELAY_SERVER: ${{ secrets.RELAY_SERVER }}
       API_SERVER: ${{ secrets.API_SERVER }}
       APP_NAME: ${{ secrets.APP_NAME }}
-      DISABLE_ACCOUNT: ${{ inputs.edition == 'client' && 'Y' || '' }}
+      TECH_PUBLIC_KEY: ${{ secrets.TECH_PUBLIC_KEY }}
+      DISABLE_ACCOUNT:${{ inputs.edition == 'client' && 'Y' || '' }}
     steps:
       - name: Export GitHub Actions cache environment variables
         uses: actions/github-script@d7906e4ad0b1822421a7e6a35d5ca353c962f410 # v6
